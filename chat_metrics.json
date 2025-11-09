@@ -1,0 +1,603 @@
+"""
+title: Chat Metrics Advanced
+original_author: constLiakos
+fork_author1: @iamg30
+fork_author2: gdshadow01
+funding_url: https://github.com/open-webui
+version: 0.3.3  # updated by gdshadow01
+license: MIT
+changelog:
+- 0.3.3 - Added per-chat tracking using chat_id from __metadata__ to fix cross-chat accumulation.
+"""
+
+from pydantic import BaseModel, Field
+from typing import Optional, Callable, Any, Awaitable, Dict
+import tiktoken
+import time
+import json
+
+MODEL_PRICING = {
+    # OpenAI models
+    "babbage-002": {"input": 0.40 / 1000000, "output": 0.40 / 1000000},
+    "chatgpt-4o-latest": {"input": 5.00 / 1000000, "output": 15.00 / 1000000},
+    "davinci-002": {"input": 2.00 / 1000000, "output": 2.00 / 1000000},
+    "gpt-4": {"input": 30.00 / 1000000, "output": 60.00 / 1000000},
+    "gpt-4-1106-preview": {"input": 10.00 / 1000000, "output": 30.00 / 1000000},
+    "gpt-4-1106-vision-preview": {"input": 10.00 / 1000000, "output": 30.00 / 1000000},
+    "gpt-4-0613": {"input": 30.00 / 1000000, "output": 60.00 / 1000000},
+    "gpt-4-0314": {"input": 30.00 / 1000000, "output": 60.00 / 1000000},
+    "gpt-4-0125-preview": {"input": 10.00 / 1000000, "output": 30.00 / 1000000},
+    "gpt-4-32k": {"input": 60.00 / 1000000, "output": 120.00 / 1000000},
+    "gpt-4.1": {"input": 2.00 / 1000000, "output": 8.00 / 1000000},
+    "gpt-4.1-2025-04-14": {"input": 2.00 / 1000000, "output": 8.00 / 1000000},
+    "gpt-4.1-mini-2025-04-14": {"input": 0.40 / 1000000, "output": 1.60 / 1000000},
+    "gpt-4.1-mini": {"input": 0.40 / 1000000, "output": 1.60 / 1000000},
+    "gpt-4.1-nano-2025-04-14": {"input": 0.10 / 1000000, "output": 0.40 / 1000000},
+    "gpt-4.1-nano": {"input": 0.10 / 1000000, "output": 0.40 / 1000000},
+    "gpt-4.5": {"input": 75.00 / 1000000, "output": 150.00 / 1000000},
+    "gpt-4.5-preview-2025-02-27": {
+        "input": 75.00 / 1000000,
+        "output": 150.00 / 1000000,
+    },
+    "gpt-4.5-preview": {"input": 75.00 / 1000000, "output": 150.00 / 1000000},
+    "gpt-4o-2024-11-20": {"input": 2.50 / 1000000, "output": 10.00 / 1000000},
+    "gpt-4o-2024-08-06": {"input": 2.50 / 1000000, "output": 10.00 / 1000000},
+    "gpt-4o-2024-05-13": {"input": 5.00 / 1000000, "output": 15.00 / 1000000},
+    "gpt-4o-audio-preview-2024-12-17": {
+        "input": 2.50 / 1000000,
+        "output": 10.00 / 1000000,
+    },
+    "gpt-4o-audio-preview-2024-10-01": {
+        "input": 2.50 / 1000000,
+        "output": 10.00 / 1000000,
+    },
+    "gpt-4o-audio-preview": {"input": 2.50 / 1000000, "output": 10.00 / 1000000},
+    "gpt-4o-mini-2024-07-18": {"input": 0.15 / 1000000, "output": 0.60 / 1000000},
+    "gpt-4o-mini-audio-preview-2024-12-17": {
+        "input": 0.15 / 1000000,
+        "output": 0.60 / 1000000,
+    },
+    "gpt-4o-mini-audio-preview": {"input": 0.15 / 1000000, "output": 0.60 / 1000000},
+    "gpt-4o-mini-realtime-preview-2024-12-17": {
+        "input": 0.60 / 1000000,
+        "output": 2.40 / 1000000,
+    },
+    "gpt-4o-mini-realtime-preview": {"input": 0.60 / 1000000, "output": 2.40 / 1000000},
+    "gpt-4o-mini-search-preview-2025-03-11": {
+        "input": 0.15 / 1000000,
+        "output": 0.60 / 1000000,
+    },
+    "gpt-4o-mini-search-preview": {"input": 0.15 / 1000000, "output": 0.60 / 1000000},
+    "gpt-4o-mini": {"input": 0.15 / 1000000, "output": 0.60 / 1000000},
+    "gpt-4o-realtime-preview-2024-12-17": {
+        "input": 5.00 / 1000000,
+        "output": 20.00 / 1000000,
+    },
+    "gpt-4o-realtime-preview-2024-10-01": {
+        "input": 5.00 / 1000000,
+        "output": 20.00 / 1000000,
+    },
+    "gpt-4o-realtime-preview": {"input": 5.00 / 1000000, "output": 20.00 / 1000000},
+    "gpt-4o-search-preview-2025-03-11": {
+        "input": 2.50 / 1000000,
+        "output": 10.00 / 1000000,
+    },
+    "gpt-4o-search-preview": {"input": 2.50 / 1000000, "output": 10.00 / 1000000},
+    "gpt-4o": {"input": 2.50 / 1000000, "output": 10.00 / 1000000},
+    "gpt-4-turbo-2024-04-09": {"input": 10.00 / 1000000, "output": 30.00 / 1000000},
+    "gpt-4-turbo": {"input": 10.00 / 1000000, "output": 30.00 / 1000000},
+    "gpt-3.5-0301": {"input": 1.50 / 1000000, "output": 2.00 / 1000000},
+    "gpt-3.5-turbo-1106": {"input": 1.00 / 1000000, "output": 2.00 / 1000000},
+    "gpt-3.5-turbo-0613": {"input": 1.50 / 1000000, "output": 2.00 / 1000000},
+    "gpt-3.5-turbo-0125": {"input": 0.50 / 1000000, "output": 1.50 / 1000000},
+    "gpt-3.5-turbo-16k-0613": {"input": 3.00 / 1000000, "output": 4.00 / 1000000},
+    "gpt-3.5-turbo-instruct": {"input": 1.50 / 1000000, "output": 2.00 / 1000000},
+    "gpt-3.5-turbo": {"input": 0.50 / 1000000, "output": 1.50 / 1000000},
+    "o1-2024-12-17": {"input": 15.00 / 1000000, "output": 60.00 / 1000000},
+    "o1-mini-2024-09-12": {"input": 1.10 / 1000000, "output": 4.40 / 1000000},
+    "o1-preview-2024-09-12": {"input": 15.00 / 1000000, "output": 60.00 / 1000000},
+    "o1-pro-2025-03-19": {"input": 150.00 / 1000000, "output": 600.00 / 1000000},
+    "o3-2025-04-16": {"input": 10.00 / 1000000, "output": 40.00 / 1000000},
+    "o3-mini-2025-01-31": {"input": 1.10 / 1000000, "output": 4.40 / 1000000},
+    "o4-mini-2025-04-16": {"input": 1.10 / 1000000, "output": 4.40 / 1000000},
+    # Anthropic models
+    "claude-3-7-sonnet-20250219": {"input": 3.00 / 1000000, "output": 15.00 / 1000000},
+    "claude-3-7-sonnet-latest": {"input": 3.00 / 1000000, "output": 15.00 / 1000000},
+    "claude-3-5-haiku-20241022": {"input": 0.80 / 1000000, "output": 4.00 / 1000000},
+    "claude-3-5-haiku-latest": {"input": 0.80 / 1000000, "output": 4.00 / 1000000},
+    "claude-3-5-sonnet-20241022": {"input": 3.00 / 1000000, "output": 15.00 / 1000000},
+    "claude-3-5-sonnet-latest": {"input": 3.00 / 1000000, "output": 15.00 / 1000000},
+    "claude-3-5-sonnet-20240620": {"input": 3.00 / 1000000, "output": 15.00 / 1000000},
+    "claude-3-opus-20240229": {"input": 15.00 / 1000000, "output": 75.00 / 1000000},
+    "claude-3-opus-latest": {"input": 15.00 / 1000000, "output": 75.00 / 1000000},
+    "claude-3-sonnet-20240229": {"input": 3.00 / 1000000, "output": 15.00 / 1000000},
+    "claude-3-haiku-20240307": {"input": 0.25 / 1000000, "output": 1.25 / 1000000},
+    # AWS Bedrock Anthropic Models
+    "anthropic.claude-3-7-sonnet-20250219-v1:0": {
+        "input": 3.00 / 1000000,
+        "output": 15.00 / 1000000,
+    },
+    "anthropic.claude-3-5-haiku-20241022-v1:0": {
+        "input": 0.80 / 1000000,
+        "output": 4.00 / 1000000,
+    },
+    "anthropic.claude-3-5-sonnet-20241022-v2:0": {
+        "input": 3.00 / 1000000,
+        "output": 15.00 / 1000000,
+    },
+    "anthropic.claude-3-5-sonnet-20240620-v1:0": {
+        "input": 3.00 / 1000000,
+        "output": 15.00 / 1000000,
+    },
+    "anthropic.claude-3-opus-20240229-v1:0": {
+        "input": 15.00 / 1000000,
+        "output": 75.00 / 1000000,
+    },
+    "anthropic.claude-3-sonnet-20240229-v1:0": {
+        "input": 3.00 / 1000000,
+        "output": 15.00 / 1000000,
+    },
+    "anthropic.claude-3-haiku-20240307-v1:0": {
+        "input": 0.25 / 1000000,
+        "output": 1.25 / 1000000,
+    },
+    # GCP Vertex AI Anthropic Models
+    "claude-3-7-sonnet@20250219": {"input": 3.00 / 1000000, "output": 15.00 / 1000000},
+    "claude-3-5-haiku@20241022": {"input": 0.80 / 1000000, "output": 4.00 / 1000000},
+    "claude-3-5-sonnet-v2@20241022": {
+        "input": 3.00 / 1000000,
+        "output": 15.00 / 1000000,
+    },
+    "claude-3-5-sonnet-v1@20240620": {
+        "input": 3.00 / 1000000,
+        "output": 15.00 / 1000000,
+    },
+    "claude-3-opus@20240229": {"input": 15.00 / 1000000, "output": 75.00 / 1000000},
+    "claude-3-sonnet@20240229": {"input": 3.00 / 1000000, "output": 15.00 / 1000000},
+    "claude-3-haiku@20240307": {"input": 0.25 / 1000000, "output": 1.25 / 1000000},
+    # GroqCloud models
+    "Llama 4 Scout (17Bx16E)": {"input": 0.11 / 1000000, "output": 0.34 / 1000000},
+    "Llama 4 Maverick (17Bx128E)": {"input": 0.20 / 1000000, "output": 0.60 / 1000000},
+    # "DeepSeek R1 Distill Llama 70B": {
+    #    "input": 0.75 / 1000000,
+    #    "output": 0.99 / 1000000,
+    # },
+    # "DeepSeek R1 Distill Qwen 32B 128k": {
+    #    "input": 0.69 / 1000000,
+    #    "output": 0.69 / 1000000,
+    # },
+    "DeepSeek R1 Distill Llama 70B": {
+        "input": 0.75 / 1000000,
+        "output": 0.99 / 1000000,
+    },
+    "Qwen QwQ 32B (Preview) 128k": {"input": 0.29 / 1000000, "output": 0.39 / 1000000},
+    # "Qwen 2.5 Coder 32B Instruct 128k": {
+    #    "input": 0.79 / 1000000,
+    #    "output": 0.79 / 1000000,
+    # },
+    "Mistral Saba 24B": {"input": 0.79 / 1000000, "output": 0.79 / 1000000},
+    # "Llama 3.2 1B (Preview) 8k": {"input": 0.04 / 1000000, "output": 0.04 / 1000000},
+    # "Llama 3.2 3B (Preview) 8k": {"input": 0.06 / 1000000, "output": 0.06 / 1000000},
+    "Llama 3.3 70B Versatile 128k": {"input": 0.59 / 1000000, "output": 0.79 / 1000000},
+    "Llama 3.1 8B Instant 128k": {"input": 0.05 / 1000000, "output": 0.08 / 1000000},
+    "Llama 3 70B 8k": {"input": 0.59 / 1000000, "output": 0.79 / 1000000},
+    "Llama 3 8B 8k": {"input": 0.05 / 1000000, "output": 0.08 / 1000000},
+    # "Mixtral 8x7B Instruct 32k": {"input": 0.24 / 1000000, "output": 0.24 / 1000000},
+    "Gemma 2 9B 8k": {"input": 0.20 / 1000000, "output": 0.20 / 1000000},
+    "Llama Guard 3 8B 8k": {"input": 0.20 / 1000000, "output": 0.20 / 1000000},
+    # "Llama 3.3 70B SpecDec 8k": {"input": 0.59 / 1000000, "output": 0.99 / 1000000},
+    # Cloudflare models
+    "@cf/meta/llama-3.2-1b-instruct": {
+        "input": 0.027 / 1000000,
+        "output": 0.201 / 1000000,
+    },
+    "@cf/meta/llama-3.2-3b-instruct": {
+        "input": 0.051 / 1000000,
+        "output": 0.335 / 1000000,
+    },
+    "@cf/meta/llama-3.1-8b-instruct-fp8-fast": {
+        "input": 0.045 / 1000000,
+        "output": 0.384 / 1000000,
+    },
+    "@cf/meta/llama-3.2-11b-vision-instruct": {
+        "input": 0.049 / 1000000,
+        "output": 0.676 / 1000000,
+    },
+    "@cf/meta/llama-3.1-70b-instruct-fp8-fast": {
+        "input": 0.293 / 1000000,
+        "output": 2.253 / 1000000,
+    },
+    "@cf/meta/llama-3.3-70b-instruct-fp8-fast": {
+        "input": 0.293 / 1000000,
+        "output": 2.253 / 1000000,
+    },
+    "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b": {
+        "input": 0.497 / 1000000,
+        "output": 4.881 / 1000000,
+    },
+    "@cf/mistral/mistral-7b-instruct-v0.1": {
+        "input": 0.110 / 1000000,
+        "output": 0.190 / 1000000,
+    },
+    "@cf/mistralai/mistral-small-3.1-24b-instruct": {
+        "input": 0.351 / 1000000,
+        "output": 0.555 / 1000000,
+    },
+    "@cf/meta/llama-3.1-8b-instruct": {
+        "input": 0.282 / 1000000,
+        "output": 0.827 / 1000000,
+    },
+    "@cf/meta/llama-3.1-8b-instruct-fp8": {
+        "input": 0.152 / 1000000,
+        "output": 0.287 / 1000000,
+    },
+    "@cf/meta/llama-3.1-8b-instruct-awq": {
+        "input": 0.123 / 1000000,
+        "output": 0.266 / 1000000,
+    },
+    "@cf/meta/llama-3-8b-instruct": {
+        "input": 0.282 / 1000000,
+        "output": 0.827 / 1000000,
+    },
+    "@cf/meta/llama-3-8b-instruct-awq": {
+        "input": 0.123 / 1000000,
+        "output": 0.266 / 1000000,
+    },
+    "@cf/meta/llama-2-7b-chat-fp16": {
+        "input": 0.556 / 1000000,
+        "output": 6.667 / 1000000,
+    },
+    "@cf/meta/llama-guard-3-8b": {"input": 0.484 / 1000000, "output": 0.030 / 1000000},
+    "@cf/meta/llama-4-scout-17b-16e-instruct": {
+        "input": 0.270 / 1000000,
+        "output": 0.850 / 1000000,
+    },
+    "@cf/google/gemma-3-12b-it": {"input": 0.345 / 1000000, "output": 0.556 / 1000000},
+    "@cf/qwen/qwq-32b": {"input": 0.660 / 1000000, "output": 1.000 / 1000000},
+    "@cf/qwen/qwen2.5-coder-32b-instruct": {
+        "input": 0.660 / 1000000,
+        "output": 1.000 / 1000000,
+    },
+    # Cohere models
+    "command-a": {"input": 2.50 / 1000000, "output": 10.00 / 1000000},
+    "command-r-plus": {"input": 2.50 / 1000000, "output": 10.00 / 1000000},
+    "command-r": {"input": 0.15 / 1000000, "output": 0.60 / 1000000},
+    "command-r-fine-tuned": {"input": 0.30 / 1000000, "output": 1.20 / 1000000},
+    "command-r-7b": {"input": 0.0375 / 1000000, "output": 0.15 / 1000000},
+    # DeepSeek models
+    "deepseek-reasoner": {"input": 0.55 / 1000000, "output": 2.19 / 1000000},
+    "deepseek-chat": {"input": 0.27 / 1000000, "output": 1.10 / 1000000},
+    # Google models
+    "gemini-2.0-flash": {"input": 0.10 / 1000000, "output": 0.40 / 1000000},
+    "gemini-2.0-flash-lite": {"input": 0.08 / 1000000, "output": 0.30 / 1000000},
+    "gemini-1.5-pro-128k": {"input": 1.25 / 1000000, "output": 5.00 / 1000000},
+    "gemini-1.5-pro-2m": {"input": 2.50 / 1000000, "output": 10.00 / 1000000},
+    "gemini-1.5-flash-128k": {"input": 0.08 / 1000000, "output": 0.30 / 1000000},
+    "gemini-1.5-flash-1m": {"input": 0.15 / 1000000, "output": 0.60 / 1000000},
+    "gemini-1.5-flash-8b-128k": {"input": 0.04 / 1000000, "output": 0.15 / 1000000},
+    "gemini-1.5-flash-8b-1m": {"input": 0.08 / 1000000, "output": 0.30 / 1000000},
+    # Grok models
+    "grok-3-beta": {"input": 3.00 / 1000000, "output": 15.00 / 1000000},
+    "grok-3": {"input": 3.00 / 1000000, "output": 15.00 / 1000000},
+    "grok-3-latest": {"input": 3.00 / 1000000, "output": 15.00 / 1000000},
+    "grok-3-fast-beta": {"input": 5.00 / 1000000, "output": 25.00 / 1000000},
+    "grok-3-fast": {"input": 5.00 / 1000000, "output": 25.00 / 1000000},
+    "grok-3-fast-latest": {"input": 5.00 / 1000000, "output": 25.00 / 1000000},
+    "grok-3-mini-beta": {"input": 0.30 / 1000000, "output": 0.50 / 1000000},
+    "grok-3-mini": {"input": 0.30 / 1000000, "output": 0.50 / 1000000},
+    "grok-3-mini-latest": {"input": 0.30 / 1000000, "output": 0.50 / 1000000},
+    "grok-3-mini-fast-beta": {"input": 0.60 / 1000000, "output": 4.00 / 1000000},
+    "grok-3-mini-fast": {"input": 0.60 / 1000000, "output": 4.00 / 1000000},
+    "grok-3-mini-fast-latest": {"input": 0.60 / 1000000, "output": 4.00 / 1000000},
+    # Mistral models
+    "mistral-large-latest": {"input": 2.00 / 1000000, "output": 6.00 / 1000000},
+    "mistral-small-latest": {"input": 0.10 / 1000000, "output": 0.30 / 1000000},
+    "codestral-latest": {"input": 0.30 / 1000000, "output": 0.90 / 1000000},
+    "ministral-8b-latest": {"input": 0.10 / 1000000, "output": 0.10 / 1000000},
+    "ministral-3b-latest": {"input": 0.04 / 1000000, "output": 0.04 / 1000000},
+    # Perplexity models
+    "r1-1776": {"input": 2.00 / 1000000, "output": 8.00 / 1000000},
+    "sonar": {"input": 1.00 / 1000000, "output": 1.00 / 1000000},
+    "sonar-deep-research": {"input": 2.00 / 1000000, "output": 8.00 / 1000000},
+    "sonar-pro": {"input": 3.00 / 1000000, "output": 15.00 / 1000000},
+    "sonar-reasoning": {"input": 1.00 / 1000000, "output": 5.00 / 1000000},
+    "sonar-reasoning-pro": {"input": 2.00 / 1000000, "output": 8.00 / 1000000},
+    # Add more pricing in the dictionary as fit for you
+    "test-model-pricing": {"input": 100.0 / 1000000, "output": 100.0 / 1000000},
+    "openai/gpt-oss-20b": {"input": 0 / 1000000, "output": 0 / 1000000},
+    "google/gemma-3-27b-it": {"input": 0 / 1000000, "output": 0 / 1000000},
+    "qwen/qwen3-235b-a22b": {"input": 0 / 1000000, "output": 0 / 1000000},
+    "deepseek/deepseek-chat-v3.1": {"input": 0 / 1000000, "output": 0 / 1000000},
+    "z-ai/glm-4.5-air": {"input": 0.13 / 1000000, "output": 0.85 / 1000000},
+    "openai/gpt-oss-120b": {"input": 0.04 / 1000000, "output": 0.4 / 1000000},
+    "openai/gpt-oss-20b": {"input": 0.03 / 1000000, "output": 0.14 / 1000000},
+    "qwen-flash": {"input": 0.05 / 1000000, "output": 0.4 / 1000000},
+    "mistral-small-latest": {"input": 0.1 / 1000000, "output": 0.3 / 1000000},
+    "qwen/qwen3-235b-a22b-2507": {"input": 0.08 / 1000000, "output": 0.55 / 1000000},
+    "qwen/qwen3-235b-a22b-thinking-2507": {"input": 0.11 / 1000000, "output": 0.6 / 1000000},
+    "qwen/qwen3-30b-a3b-instruct-2507": {"input": 0.08 / 1000000, "output": 0.33 / 1000000},
+    "qwen3-30b-a3b-instruct-2507": {"input": 0.2 / 1000000, "output": 0.8 / 1000000},
+    "Deepseek.deepseek-chat": {"input": 0.28 / 1000000, "output": 0.42 / 1000000},
+    "Deepseek.deepseek-reasoner": {"input": 0.28 / 1000000, "output": 0.42 / 1000000},
+    "qwen/qwen3-vl-235b-a22b-instruct": {"input": 0.22 / 1000000, "output": 0.88 / 1000000},
+    "codestral-latest": {"input": 0.3 / 1000000, "output": 0.9 / 1000000},
+    "qwen-plus": {"input": 0.4 / 1000000, "output": 4 / 1000000},
+    "magistral-small-latest": {"input": 0.5 / 1000000, "output": 1.5 / 1000000},
+    "qwen3-next-80b-a3b-instruct": {"input": 0.5 / 1000000, "output": 2 / 1000000},
+    "qwen3-30b-a3b-thinking-2507": {"input": 0.2 / 1000000, "output": 2.4 / 1000000},
+    "qwen3-vl-plus": {"input": 0.2 / 1000000, "output": 2.4 / 1000000},
+    "mistral-medium-latest": {"input": 0.4 / 1000000, "output": 2 / 1000000},
+    "Moonshot-Kimi-K2-Instruct": {"input": 0.574 / 1000000, "output": 2.294 / 1000000},
+    "open-mixtral-8x7b": {"input": 0.7 / 1000000, "output": 0.7 / 1000000},
+    "qwen3-235b-a22b-instruct-2507": {"input": 0.7 / 1000000, "output": 2.8 / 1000000},
+    "magistral-medium-latest": {"input": 2 / 1000000, "output": 5 / 1000000},
+    "qwen3-next-80b-a3b-thinking": {"input": 0.5 / 1000000, "output": 6 / 1000000},
+    "qwen3-max": {"input": 1.2 / 1000000, "output": 12 / 1000000},
+    "z-ai/glm-4.6": {"input": 0.4 / 1000000, "output": 1.75 / 1000000}
+
+}
+
+
+def get_encoding_for_model(model_name: str) -> tiktoken.Encoding:
+    try:
+        model_name = model_name.lower()
+        if "gpt-4o" in model_name or "gpt-4o-mini" in model_name:
+            return tiktoken.get_encoding("o200k_base")
+        elif (
+            "gpt-4-turbo" in model_name
+            or "gpt-4" in model_name
+            or "gpt-3.5-turbo" in model_name
+            or ("codex" not in model_name and "gpt-3" in model_name)
+        ):
+            return tiktoken.get_encoding("cl100k_base")
+        elif "codex" in model_name or (
+            "text-davinci" in model_name and "gpt-3" not in model_name
+        ):
+            return tiktoken.get_encoding("p50k_base")
+        elif "gpt-3" in model_name and "gpt-3.5-turbo" not in model_name:
+            return tiktoken.get_encoding("r50k_base")
+        else:
+            return tiktoken.get_encoding("cl100k_base")
+    except Exception:
+        return tiktoken.get_encoding("cl100k_base")
+
+
+def num_tokens_from_string(text: str, model_name: str) -> int:
+    if not text:
+        return 0
+    try:
+        encoding = get_encoding_for_model(model_name)
+        return len(encoding.encode(text))
+    except Exception as e:
+        print(f"Token counting fallback for model {model_name}: {e}")
+        return len(text) // 4
+
+
+def find_matching_model(model_name: str, default_model: str) -> str:
+    if not model_name:
+        return default_model
+    model_name_lower = model_name.lower()
+    for known in MODEL_PRICING:
+        if known.lower() == model_name_lower:
+            return known
+    for known in MODEL_PRICING:
+        if known.lower() in model_name_lower or model_name_lower in known.lower():
+            return known
+    for family in ["gpt", "claude", "llama", "mistral", "qwen", "gemma"]:
+        if family in model_name_lower:
+            for known in MODEL_PRICING:
+                if family in known.lower():
+                    return known
+    return default_model
+
+
+def estimate_cost(
+    input_tokens: int, output_tokens: int, model_name: str, default_model: str
+) -> float:
+    model = find_matching_model(model_name, default_model)
+    pricing = MODEL_PRICING.get(model) or MODEL_PRICING.get(default_model)
+    if not pricing:
+        print(
+            f"Warning: No pricing found for '{model}' or default '{default_model}'. Using $0."
+        )
+        pricing = {"input": 0, "output": 0}
+    return input_tokens * pricing["input"] + output_tokens * pricing["output"]
+
+
+class Filter:
+    class Valves(BaseModel):
+        priority: int = Field(
+            default=5, description="Priority level for the filter operations."
+        )
+        default_model: str = Field(
+            default="Llama 3.3 70B Versatile 128k",
+            description="Default model for token counting.",
+        )
+        elapsed_time: bool = Field(default=True, description="Show elapsed time.")
+        tokens_no: bool = Field(default=True, description="Display token counts.")
+        cost_estimate: bool = Field(default=True, description="Show estimated cost.")
+        session_stats: bool = Field(
+            default=True, description="Track per-chat totals (now isolated by chat)."
+        )
+        detailed_view: bool = Field(
+            default=True, description="Show detailed vs compact view."
+        )
+        response_tokens_rate: bool = Field(
+            default=True, description="Display response tokens/sec."
+        )
+        total_duration: bool = Field(
+            default=True, description="Display total duration."
+        )
+        load_duration: bool = Field(default=True, description="Display load duration.")
+        prompt_eval_count: bool = Field(
+            default=True, description="Display prompt eval count."
+        )
+        prompt_eval_duration: bool = Field(
+            default=True, description="Display prompt eval duration."
+        )
+        eval_count: bool = Field(default=True, description="Display eval count.")
+        eval_duration: bool = Field(default=True, description="Display eval duration.")
+        completion_token_details: bool = Field(
+            default=True, description="Show completion token details."
+        )
+
+    def __init__(self):
+        self.valves = self.Valves()
+        # Store stats per chat_id
+        self.chat_stats = {}  # chat_id → dict of stats
+
+    def inlet(self, body: dict):
+        """Minimal inlet: just record start time."""
+        # Note: __metadata__ not available here, so we defer all logic to outlet
+        return body
+
+    async def outlet(
+        self,
+        body: dict,
+        __event_emitter__: Callable[[Any], Awaitable[None]],
+        __metadata__: dict,  # ✅ Now we have chat context!
+        model: Optional[dict] = None,
+    ) -> dict:
+        try:
+            chat_id = __metadata__.get("chat_id", "default")
+            if chat_id not in self.chat_stats:
+                self.chat_stats[chat_id] = {
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "total_cost": 0.0,
+                    "request_count": 0,
+                    "start_time": time.time(),  # optional: track chat start
+                }
+            stats = self.chat_stats[chat_id]
+
+            # Get model name
+            model_name = body.get("model") or self.valves.default_model
+
+            # Extract messages
+            messages = body.get("messages", [])
+            user_messages = [m for m in messages if m.get("role") == "user"]
+            assistant_messages = [m for m in messages if m.get("role") == "assistant"]
+
+            # Use last user message for input tokens
+            input_tokens = 0
+            if user_messages:
+                latest_user = user_messages[-1].get("content", "")
+                input_tokens = num_tokens_from_string(latest_user, model_name)
+                stats["input_tokens"] += input_tokens
+
+            # Use last assistant message for output tokens
+            output_tokens = 0
+            last_assistant_msg = assistant_messages[-1] if assistant_messages else None
+            if last_assistant_msg:
+                response_text = last_assistant_msg.get("content", "")
+                output_tokens = num_tokens_from_string(response_text, model_name)
+                stats["output_tokens"] += output_tokens
+
+            # Extract usage data (if provided by backend)
+            usage = (last_assistant_msg or {}).get("usage", {})
+            prompt_tokens = usage.get("prompt_tokens", input_tokens)
+            completion_tokens = usage.get("completion_tokens", output_tokens)
+            response_tps = usage.get("response_token/s")
+            prompt_tps = usage.get("prompt_token/s")
+            total_duration = usage.get("total_duration", 0) / 1e9
+            load_duration = usage.get("load_duration", 0) / 1e9
+            prompt_eval_duration = usage.get("prompt_eval_duration", 0) / 1e9
+            eval_duration = usage.get("eval_duration", 0) / 1e9
+            prompt_eval_count = usage.get("prompt_eval_count")
+            eval_count = usage.get("eval_count")
+            completion_details = usage.get("completion_tokens_details", {})
+
+            # Estimate cost
+            current_cost = 0.0
+            if self.valves.cost_estimate or self.valves.session_stats:
+                current_cost = estimate_cost(
+                    prompt_tokens,
+                    completion_tokens,
+                    model_name,
+                    self.valves.default_model,
+                )
+                stats["total_cost"] += current_cost
+
+            stats["request_count"] += 1
+            elapsed_time = time.time() - stats["start_time"]
+
+            # Build stats display
+            stats_parts = []
+
+            if self.valves.detailed_view:
+                if self.valves.elapsed_time:
+                    stats_parts.append(f"Time: {elapsed_time:.2f}s")
+                if self.valves.tokens_no:
+                    stats_parts.append(
+                        f"Input: {stats['input_tokens']}, Output: {stats['output_tokens']}"
+                    )
+                if self.valves.response_tokens_rate and response_tps:
+                    stats_parts.append(f"Response Speed: {response_tps:.1f} t/s")
+                if self.valves.total_duration and total_duration > 0:
+                    stats_parts.append(f"Total Duration: {total_duration:.3f}s")
+                if self.valves.load_duration and load_duration > 0:
+                    stats_parts.append(f"Load: {load_duration:.3f}s")
+                if self.valves.prompt_eval_count and prompt_eval_count:
+                    stats_parts.append(f"Prompt Evals: {prompt_eval_count}")
+                if self.valves.prompt_eval_duration and prompt_eval_duration > 0:
+                    stats_parts.append(f"Prompt Eval Time: {prompt_eval_duration:.3f}s")
+                if self.valves.eval_count and eval_count:
+                    stats_parts.append(f"Eval Count: {eval_count}")
+                if self.valves.eval_duration and eval_duration > 0:
+                    stats_parts.append(f"Eval Time: {eval_duration:.3f}s")
+                if self.valves.cost_estimate:
+                    stats_parts.append(f"Cost: ${current_cost:.6f}")
+                if self.valves.session_stats:
+                    total_tok = stats["input_tokens"] + stats["output_tokens"]
+                    cost_str = (
+                        f" (${stats['total_cost']:.6f})"
+                        if not self.valves.cost_estimate
+                        else ""
+                    )
+                    stats_parts.append(f"Chat Total: {total_tok} tokens{cost_str}")
+                if self.valves.completion_token_details and any(
+                    completion_details.values()
+                ):
+                    details = ", ".join(
+                        f"{k}: {v}" for k, v in completion_details.items()
+                    )
+                    stats_parts.append(f"Completion Details: [{details}]")
+            else:
+                compact = []
+                if self.valves.elapsed_time:
+                    compact.append(f"Time: {elapsed_time:.2f}s")
+                if self.valves.tokens_no:
+                    compact.append(
+                        f"In: {stats['input_tokens']} Out: {stats['output_tokens']}"
+                    )
+                if self.valves.response_tokens_rate and response_tps:
+                    compact.append(f"R.Speed: {response_tps:.1f}t/s")
+                if self.valves.total_duration and total_duration > 0:
+                    compact.append(f"Total Dur: {total_duration:.3f}s")
+                if self.valves.cost_estimate:
+                    compact.append(f"Cost: ${current_cost:.6f}")
+                if self.valves.session_stats:
+                    total_tok = stats["input_tokens"] + stats["output_tokens"]
+                    cost_str = (
+                        f" (${stats['total_cost']:.6f})"
+                        if not self.valves.cost_estimate
+                        else ""
+                    )
+                    compact.append(f"Chat: {total_tok}t{cost_str}")
+                stats_parts = [" · ".join(compact)]
+
+            final_stats = (" | " if self.valves.detailed_view else " · ").join(
+                stats_parts
+            )
+
+            await __event_emitter__(
+                {"type": "status", "data": {"description": final_stats}}
+            )
+
+        except Exception as e:
+            print(f"Chat Metrics error: {e}")
+            await __event_emitter__(
+                {"type": "status", "data": {"description": "Chat Metrics: Error"}}
+            )
+
+        return body
