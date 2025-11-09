@@ -8,6 +8,7 @@ Changes:
   - updated Models
 
 How to use:
+
 In OpenWebUI -> Admin Panel -> Functions -> 
 either a) New Function -> New Function -> replace example code with contents of chat_metrics.json 
 or b) (if you downloaded chat_metrics.json) Import 
