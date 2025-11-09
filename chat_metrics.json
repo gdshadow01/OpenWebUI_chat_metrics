@@ -327,7 +327,8 @@ MODEL_PRICING = {
     "magistral-medium-latest": {"input": 2 / 1000000, "output": 5 / 1000000},
     "qwen3-next-80b-a3b-thinking": {"input": 0.5 / 1000000, "output": 6 / 1000000},
     "qwen3-max": {"input": 1.2 / 1000000, "output": 12 / 1000000},
-    "z-ai/glm-4.6": {"input": 0.4 / 1000000, "output": 1.75 / 1000000}
+    "z-ai/glm-4.6": {"input": 0.4 / 1000000, "output": 1.75 / 1000000},
+    "google/gemma-3-27b-it" {"input": 0.09 / 1000000, "output": 0.16 / 1000000},
 
 }
 
