@@ -1,4 +1,4 @@
-"""
+""
 title: Chat Metrics Advanced
 original_author: constLiakos
 fork_author1: @iamg30
@@ -8,7 +8,7 @@ version: 0.3.3  # updated by gdshadow01
 license: MIT
 changelog:
 - 0.3.3 - Added per-chat tracking using chat_id from __metadata__ to fix cross-chat accumulation.
-"""
+""
 
 from pydantic import BaseModel, Field
 from typing import Optional, Callable, Any, Awaitable, Dict
