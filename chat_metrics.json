@@ -301,19 +301,28 @@ MODEL_PRICING = {
     "sonar-reasoning": {"input": 1.00 / 1000000, "output": 5.00 / 1000000},
     "sonar-reasoning-pro": {"input": 2.00 / 1000000, "output": 8.00 / 1000000},
     # Add more pricing in the dictionary as fit for you (Version 25/11/09)
-    "test-model-pricing": {"input": 100.0 / 1000000, "output": 100.0 / 1000000},
+    "test-model-pricing": {"input": 10000.0 / 1000000, "output": 10000.0 / 1000000},
     "z-ai/glm-4.5-air": {"input": 0.13 / 1000000, "output": 0.85 / 1000000},
     "openai/gpt-oss-120b": {"input": 0.04 / 1000000, "output": 0.4 / 1000000},
     "openai/gpt-oss-20b": {"input": 0.03 / 1000000, "output": 0.14 / 1000000},
     "qwen-flash": {"input": 0.05 / 1000000, "output": 0.4 / 1000000},
     "mistral-small-latest": {"input": 0.1 / 1000000, "output": 0.3 / 1000000},
     "qwen/qwen3-235b-a22b-2507": {"input": 0.08 / 1000000, "output": 0.55 / 1000000},
-    "qwen/qwen3-235b-a22b-thinking-2507": {"input": 0.11 / 1000000, "output": 0.6 / 1000000},
-    "qwen/qwen3-30b-a3b-instruct-2507": {"input": 0.08 / 1000000, "output": 0.33 / 1000000},
+    "qwen/qwen3-235b-a22b-thinking-2507": {
+        "input": 0.11 / 1000000,
+        "output": 0.6 / 1000000,
+    },
+    "qwen/qwen3-30b-a3b-instruct-2507": {
+        "input": 0.08 / 1000000,
+        "output": 0.33 / 1000000,
+    },
     "qwen3-30b-a3b-instruct-2507": {"input": 0.2 / 1000000, "output": 0.8 / 1000000},
     "Deepseek.deepseek-chat": {"input": 0.28 / 1000000, "output": 0.42 / 1000000},
     "Deepseek.deepseek-reasoner": {"input": 0.28 / 1000000, "output": 0.42 / 1000000},
-    "qwen/qwen3-vl-235b-a22b-instruct": {"input": 0.22 / 1000000, "output": 0.88 / 1000000},
+    "qwen/qwen3-vl-235b-a22b-instruct": {
+        "input": 0.22 / 1000000,
+        "output": 0.88 / 1000000,
+    },
     "codestral-latest": {"input": 0.3 / 1000000, "output": 0.9 / 1000000},
     "qwen-plus": {"input": 0.4 / 1000000, "output": 4 / 1000000},
     "magistral-small-latest": {"input": 0.5 / 1000000, "output": 1.5 / 1000000},
@@ -327,9 +336,15 @@ MODEL_PRICING = {
     "magistral-medium-latest": {"input": 2 / 1000000, "output": 5 / 1000000},
     "qwen3-next-80b-a3b-thinking": {"input": 0.5 / 1000000, "output": 6 / 1000000},
     "qwen3-max": {"input": 1.2 / 1000000, "output": 12 / 1000000},
-    "z-ai/glm-4.6": {"input": 0.4 / 1000000, "output": 1.75 / 1000000},
-    "google/gemma-3-27b-it" {"input": 0.09 / 1000000, "output": 0.16 / 1000000},
-
+    "z-ai/glm-4.7": {"input": 0.4 / 1000000, "output": 1.75 / 1000000},
+    "x-ai/grok-4-fast": {"input": 0.2 / 1000000, "output": 0.5 / 1000000},
+    "magistral-medium-latest": {"input": 2.0 / 1000000, "output": 5.0 / 1000000},
+    "ministral-14b-latest": {"input": 0.2 / 1000000, "output": 0.2 / 1000000},
+    ## custom models
+    "Vergaberecht": {"input": 0.4 / 1000000, "output": 1.5 / 1000000},
+    "RAG": {"input": 0.4 / 1000000, "output": 1.5 / 1000000},
+    "Daily": {"input": 0.4 / 1000000, "output": 1.5 / 1000000},
+    "Search": {"input": 0.4 / 1000000, "output": 1.5 / 1000000}, 
 }
 
 
